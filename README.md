@@ -1,3 +1,8 @@
-# Concept of proxy based mock frameworks
+# Simple proxy based mock framework implementation
 
-This code demonstrates how proxy based mock frameworks work like Mockito.
+The code demonstrates a simple example of proxy based mock creation.
+Simple mock tests include creation, arrangement, action and verification
+stages. Verification options like method invocation ordering are not considered.
+Two proxy techniques are implemented:
+- based on java.lang.reflect.Proxy
+- CGLib proxying

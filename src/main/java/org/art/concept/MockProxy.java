@@ -3,70 +3,127 @@ package org.art.concept;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
-import java.util.Deque;
-import java.util.LinkedList;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
+import java.util.stream.Stream;
+
+import static java.util.stream.Collectors.joining;
 
 /**
  * Simple presentation of a mock creation concept based on
  * {@link java.lang.reflect.Proxy}.
  * This mock class is limited to mock interfaces because of
  * the limitation of the Proxy class.
+ * Doesn't consider the order of method invocations.
  */
 public class MockProxy {
 
-    private static final ThreadLocal<OngoingStub> THREAD_HOLDER = new ThreadLocal<>();
+    private static final ThreadLocal<MockProgress> THREAD_HOLDER = ThreadLocal.withInitial(MockProgress::new);
 
+    private static final Random RND = new Random(System.currentTimeMillis());
+
+    private static final String TO_STRING_METHOD = "toString";
+    private static final String HASHCODE_METHOD = "hashCode";
+    private static final String EQUALS_METHOD = "equals";
+
+    /**
+     * Creates mock based on a specified class token.
+     */
     @SuppressWarnings("unchecked")
     public static <T> T mock(Class<T> clazz) {
         return (T) Proxy.newProxyInstance(MockProxy.class.getClassLoader(),
                 new Class[]{clazz}, new MockInvocationHandler());
     }
 
-    public static OngoingStub when(Objects obj) {
-        return THREAD_HOLDER.get();
+    public static <T> OngoingStub<T> when(T obj) {
+        return new OngoingStub<>();
     }
 
-    public static class OngoingStub {
+    public static <T> T verify(T mock) {
+        MockProgress progress = THREAD_HOLDER.get();
+        //Adding into verification set (verification stage)
+        progress.getVerificationSet().add(mock);
+        return mock;
+    }
 
-        private Set<MockInvocationHandler> handlers;
+    public static class OngoingStub<T> {
 
-        public OngoingStub thenReturn(Object retObj) {
-            OngoingStub stub = THREAD_HOLDER.get();
-            stub.getHandlers()
-            return null;
-        }
-
-        public Set<MockInvocationHandler> getHandlers() {
-            return handlers;
+        /**
+         * Sets the return value for the last method call.
+         */
+        public OngoingStub<T> thenReturn(T retObj) {
+            MockProgress progress = THREAD_HOLDER.get();
+            MockInvocationHandler currentHandler = progress.getCurrentHandler();
+            MockInvocationHandler.DataHolder lastHolder = currentHandler.getDataHolders().getLast();
+            lastHolder.retObj = retObj;
+            return new OngoingStub<>();
         }
     }
 
-    private static class MockInvocationHandler implements InvocationHandler {
+    public static class MockInvocationHandler implements InvocationHandler {
 
         private Deque<DataHolder> dataHolders = new LinkedList<>();
 
+        private int proxyHashcode = RND.nextInt();
+
         /**
-         * Intercepts the method call and decides what value will be returned.
+         * Intercepts the method call and decides what mock stage should be triggered.
          */
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) {
 
-            OngoingStub stub = THREAD_HOLDER.get();
-            if (stub == null) {
-                stub = new OngoingStub();
-                THREAD_HOLDER.set(stub);
+            //Simulates hashCode() method invocation (allows to store mock in Set)
+            if (HASHCODE_METHOD.equals(method.getName())) {
+                return proxyHashcode;
             }
 
+            //Simulates equals() method invocation
+            if (EQUALS_METHOD.equals(method.getName())) {
+                return this.proxyHashcode == args[0].hashCode();
+            }
 
+            //Check if mock is in the verification stage
+            Set<Object> verifSet = THREAD_HOLDER.get().getVerificationSet();
+            if (verifSet.contains(proxy)) {
+                DataHolder requestedData = new DataHolder(method, args);
+                boolean verifResult = dataHolders.stream()
+                        .anyMatch(holder -> holder.containsInvocation(requestedData));
+                String argsString = Stream.of(args)
+                        .map(String::valueOf)
+                        .collect(joining(","));
+                if (!verifResult) {
+                    //Print error message...
+                    System.out.printf("Verification failed! Method %s(%s) wasn't invoked.%n", method.getName(), argsString);
+                    //throw new AssertionError();
+                } else {
+                    //Print success message...
+                    System.out.printf("Verification passed! Method %s(%s) was invoked.%n", method.getName(), argsString);
+                }
+                verifSet.remove(proxy);
+                return null;
+            }
 
-            DataHolder holder = new DataHolder(method, args);
-            dataHolders.add(holder);
+            //Method interception
+            //Ignore implicit toString() method invocations during the debugging mode
+            if (!TO_STRING_METHOD.equals(method.getName())) {
+                DataHolder holder = new DataHolder(method, args);
+                dataHolders.addLast(holder);
+            }
+            MockProgress progress = THREAD_HOLDER.get();
 
-            stub.getHandlers().add(this);
+            progress.setCurrentHandler(this);
 
+            DataHolder invocation = findInvocation(method, args);
+            if (invocation != null) {
+                return invocation.retObj;
+            }
             return null;
+        }
+
+        private DataHolder findInvocation(Method method, Object[] args) {
+            return this.dataHolders.stream()
+                    .filter(holder -> holder.method.equals(method) && Arrays.deepEquals(holder.args, args))
+                    .findFirst()
+                    .orElse(null);
         }
 
         public Deque<DataHolder> getDataHolders() {
@@ -74,9 +131,10 @@ public class MockProxy {
         }
 
         /**
-         * Stores the method with it's arguments and the return value.
+         * Stores the method invocation data with
+         * its name, arguments and return value.
          */
-        private class DataHolder {
+        private static class DataHolder {
 
             private Object[] args;
             private Method method;
@@ -87,41 +145,37 @@ public class MockProxy {
                 this.method = method;
             }
 
-            private Object[] getArgs() {
-                return args;
-            }
-
-            private Method getMethod() {
-                return method;
-            }
-
-            private Object getRetObj() {
-                return retObj;
+            private boolean containsInvocation(DataHolder holder) {
+                return Arrays.deepEquals(this.args, holder.args)
+                        && this.method.getName().equals(holder.method.getName());
             }
         }
     }
+}
 
-    public static void main(String[] args) {
+/**
+ * Helper class which contains the current state of "mocking flow".
+ */
+class MockProgress {
 
-        TargetInterface interfProxy = MockProxy.mock(TargetInterface.class);
-        System.out.println(interfProxy.hashCode());
+    private MockProxy.MockInvocationHandler currentHandler;
 
-//        when(interfProxy.invokeHelloWithParam("World")).thenReturn("Hello");
+    private Set<Object> verificationSet = new HashSet<>();
 
-
+    MockProgress() {
+        //Initialization with an empty handler
+        currentHandler = new MockProxy.MockInvocationHandler();
     }
 
-//    //Arrange stage
-//    String userLogin = "user_login_1";
-//    User user = new User(3L, "Harry", "Potter", userLogin, "22.03.18", Role.USER);
-//
-//    when(userDao.getUserByLogin(userLogin)).thenReturn(user);
-//
-//    //Act stage
-//        userService.getUserByLogin(userLogin);
-//
-//    //Assert stage
-//    verify(userDao, times(1)).getUserByLogin(userLogin);
-//    verifyNoMoreInteractions(userDao);
+    public MockProxy.MockInvocationHandler getCurrentHandler() {
+        return currentHandler;
+    }
 
+    public Set<Object> getVerificationSet() {
+        return verificationSet;
+    }
+
+    public void setCurrentHandler(MockProxy.MockInvocationHandler currentHandler) {
+        this.currentHandler = currentHandler;
+    }
 }

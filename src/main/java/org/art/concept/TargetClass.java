@@ -6,10 +6,10 @@ package org.art.concept;
 public class TargetClass {
 
     public String invokeHello() {
-        return "Hello!";
+        return "Hello from the origin class!";
     }
 
     public String invokeHelloWithParam(String param) {
-        return "Hello " + param + "!";
+        return param;
     }
 }
