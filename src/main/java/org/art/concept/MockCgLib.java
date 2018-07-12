@@ -22,9 +22,9 @@ public class MockCgLib {
 
     private static final Random RND = new Random(System.currentTimeMillis());
 
-    private static final String TO_STRING_METHOD = "toString";
-    private static final String HASHCODE_METHOD = "hashCode";
-    private static final String EQUALS_METHOD = "equals";
+    private static final String TO_STRING_METHOD_NAME = "toString";
+    private static final String HASHCODE_METHOD_NAME = "hashCode";
+    private static final String EQUALS_METHOD_NAME = "equals";
 
     /**
      * Creates mock based on a specified class token.
@@ -77,7 +77,7 @@ public class MockCgLib {
 
         private Deque<DataHolder> dataHolders = new LinkedList<>();
 
-        private int proxyHashcode = RND.nextInt();
+        private int proxyHashcode = RND.nextInt(Integer.MAX_VALUE);      //random hashcode generation
 
         /**
          * Intercepts the method call and decides what value will be returned.
@@ -85,12 +85,12 @@ public class MockCgLib {
         @Override
         public Object intercept(Object obj, Method method, Object[] args, MethodProxy proxy) throws Throwable {
             //Simulates hashCode() method invocation (allows to store mock in Set)
-            if (HASHCODE_METHOD.equals(method.getName())) {
+            if (HASHCODE_METHOD_NAME.equals(method.getName())) {
                 return proxyHashcode;
             }
 
             //Simulates equals() method invocation
-            if (EQUALS_METHOD.equals(method.getName())) {
+            if (EQUALS_METHOD_NAME.equals(method.getName())) {
                 return this.proxyHashcode == args[0].hashCode();
             }
 
@@ -117,7 +117,7 @@ public class MockCgLib {
 
             //Method interception
             //Ignore implicit toString() method invocations during the debugging mode
-            if (!TO_STRING_METHOD.equals(method.getName())) {
+            if (!TO_STRING_METHOD_NAME.equals(method.getName())) {
                 DataHolder holder = new DataHolder(method, args);
                 dataHolders.addLast(holder);
             }
